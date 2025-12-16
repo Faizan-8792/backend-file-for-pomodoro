@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Login Success</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        padding: 24px;
+        color: #111;
+        background: #ffffff;
+      }
+      .card {
+        max-width: 560px;
+        margin: 0 auto;
+        border: 1px solid #e5e7eb;
+        border-radius: 12px;
+        padding: 18px;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.06);
+      }
+      .muted {
+        color: #6b7280;
+        font-size: 13px;
+        line-height: 1.45;
+      }
+      code {
+        background: #f3f4f6;
+        padding: 2px 6px;
+        border-radius: 6px;
+      }
+      .ok {
+        color: #166534;
+      }
+      .bad {
+        color: #991b1b;
+      }
+    </style>
+  </head>
+
+  <body>
+    <div class="card">
+      <h3>Login successful.</h3>
+      <p class="muted">You can close this tab. This page will close automatically.</p>
+      <p class="muted" id="status">Sending login to extension...</p>
+      <p class="muted" id="details"></p>
+    </div>
+
+    <script>
+      (function () {
+        const statusEl = document.getElementById("status");
+        const detailsEl = document.getElementById("details");
+
+        function setStatus(text, kind) {
+          statusEl.textContent = text;
+          statusEl.className = "muted" + (kind ? " " + kind : "");
+        }
+
+        function setDetails(text) {
+          detailsEl.textContent = text || "";
+        }
+
+        try {
+          const params = new URLSearchParams(window.location.search);
+          const token = params.get("token");
+          const userRaw = params.get("user");
+
+          if (!token || !userRaw) {
+            setStatus("Token or user missing in URL parameters.", "bad");
+            setDetails("Expected: ?token=...&user=...");
+            return;
+          }
+
+          let user;
+          try {
+            user = JSON.parse(decodeURIComponent(userRaw));
+          } catch (e) {
+            setStatus("Could not parse user data.", "bad");
+            setDetails("User payload was not valid JSON after decoding.");
+            return;
+          }
+
+          // Keep your existing extension ID exactly the same.
+          const EXTENSION_ID = "bomnpladbggdembadomccokmieakfpdj";
+
+          // Send message to extension (service worker listens on onMessageExternal). [web:67]
+          chrome.runtime.sendMessage(
+            EXTENSION_ID,
+            { type: "LOGIN_SUCCESS", token, user },
+            (response) => {
+              // Check runtime.lastError in callback (best practice). [web:71]
+              if (chrome.runtime.lastError) {
+                setStatus("Extension not reachable.", "bad");
+                setDetails(
+                  chrome.runtime.lastError.message +
+                    " (Check: extension installed/enabled + externally_connectable in manifest.)"
+                );
+                return;
+              }
+
+              setStatus("Login sent to extension. Closing...", "ok");
+              setDetails("");
+
+              setTimeout(() => window.close(), 450);
+            }
+          );
+        } catch (e) {
+          setStatus("Unexpected error while sending login.", "bad");
+          setDetails(String(e && e.message ? e.message : e));
+          console.error(e);
+        }
+      })();
+    </script>
+  </body>
+</html>
