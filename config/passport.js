@@ -3,15 +3,19 @@ const GoogleStrategy = require("passport-google-oauth20").Strategy;
 
 const User = require("../models/User");
 
+// ✅ Always use an absolute HTTPS callback URL in production
+// Set BASE_URL on Render: https://backend-file-for-pomodoro.onrender.com
+const BASE_URL =
+  process.env.BASE_URL || "https://backend-file-for-pomodoro.onrender.com";
+
 passport.use(
   new GoogleStrategy(
     {
-      // Keep same env var names. [file:49]
       clientID: process.env.GOOGLE_CLIENT_ID,
       clientSecret: process.env.GOOGLE_CLIENT_SECRET,
 
-      // Keep same callback path used by your backend routes. [file:49]
-      callbackURL: "/auth/google/callback",
+      // IMPORTANT: must match Google Cloud Console Authorized redirect URI exactly
+      callbackURL: `${BASE_URL}/auth/google/callback`
     },
     async (accessToken, refreshToken, profile, done) => {
       try {
@@ -31,7 +35,7 @@ passport.use(
             googleId,
             name,
             email,
-            photo,
+            photo
           });
         }
 

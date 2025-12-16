@@ -5,8 +5,8 @@ const jwt = require("jsonwebtoken");
 const router = express.Router();
 
 /**
- * @route   GET /auth/google
- * @desc    Start Google OAuth
+ * @route GET /auth/google
+ * @desc Start Google OAuth
  */
 router.get(
   "/google",
@@ -16,15 +16,14 @@ router.get(
 );
 
 /**
- * @route   GET /auth/google/callback
- * @desc    Google OAuth callback
+ * @route GET /auth/google/callback
+ * @desc Google OAuth callback
  */
 router.get(
   "/google/callback",
   passport.authenticate("google", { session: false }),
   (req, res) => {
     try {
-      // Keep same token payload shape + same env var name used here. [file:48]
       const token = jwt.sign({ id: req.user._id }, process.env.JWT_SECRET, {
         expiresIn: "7d",
       });
@@ -35,16 +34,20 @@ router.get(
         photo: req.user.photo,
       };
 
-      // Keep same redirect behavior to local success page (not extension). [file:48]
+      // ✅ FIX: Use deployed base URL instead of localhost
+      // Set BASE_URL on Render: https://backend-file-for-pomodoro.onrender.com
+      const BASE_URL =
+        process.env.BASE_URL || "https://backend-file-for-pomodoro.onrender.com";
+
       const redirectUrl =
-        "http://localhost:5000/auth-success.html" +
+        `${BASE_URL}/auth-success.html` +
         `?token=${encodeURIComponent(token)}` +
         `&user=${encodeURIComponent(JSON.stringify(user))}`;
 
-      res.redirect(redirectUrl);
+      return res.redirect(redirectUrl);
     } catch (err) {
       console.error("Google login error:", err);
-      res.status(500).send("Authentication failed");
+      return res.status(500).send("Authentication failed");
     }
   }
 );
