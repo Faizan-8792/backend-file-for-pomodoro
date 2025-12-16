@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>Login Success</title>
+    <title>Auth Success</title>
     <style>
       body {
         font-family: Arial, sans-serif;
@@ -73,27 +73,39 @@
 
           let user;
           try {
-            user = JSON.parse(decodeURIComponent(userRaw));
+            // userRaw is already URLSearchParams-decoded; decode only if needed:
+            // If JSON.parse fails, we try decodeURIComponent once.
+            try {
+              user = JSON.parse(userRaw);
+            } catch (_) {
+              user = JSON.parse(decodeURIComponent(userRaw));
+            }
           } catch (e) {
             setStatus("Could not parse user data.", "bad");
-            setDetails("User payload was not valid JSON after decoding.");
+            setDetails("User payload was not valid JSON.");
             return;
           }
 
-          // Keep your existing extension ID exactly the same.
+          // IMPORTANT:
+          // Extension ID changes when you load unpacked on another PC / profile.
+          // For unpacked testing: chrome://extensions -> copy ID -> paste here.
           const EXTENSION_ID = "bomnpladbggdembadomccokmieakfpdj";
 
-          // Send message to extension (service worker listens on onMessageExternal). [web:67]
+          if (!chrome?.runtime?.sendMessage) {
+            setStatus("This page must be opened in Chrome with the extension installed.", "bad");
+            setDetails("chrome.runtime API not available.");
+            return;
+          }
+
           chrome.runtime.sendMessage(
             EXTENSION_ID,
             { type: "LOGIN_SUCCESS", token, user },
             (response) => {
-              // Check runtime.lastError in callback (best practice). [web:71]
               if (chrome.runtime.lastError) {
                 setStatus("Extension not reachable.", "bad");
                 setDetails(
                   chrome.runtime.lastError.message +
-                    " (Check: extension installed/enabled + externally_connectable in manifest.)"
+                    " | Check: extension installed/enabled AND manifest externally_connectable matches this domain."
                 );
                 return;
               }

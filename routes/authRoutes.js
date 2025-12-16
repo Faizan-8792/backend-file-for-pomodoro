@@ -34,8 +34,7 @@ router.get(
         photo: req.user.photo,
       };
 
-      // ✅ FIX: Use deployed base URL instead of localhost
-      // Set BASE_URL on Render: https://backend-file-for-pomodoro.onrender.com
+      // ✅ FIX: redirect to your deployed backend (not localhost)
       const BASE_URL =
         process.env.BASE_URL || "https://backend-file-for-pomodoro.onrender.com";
 
