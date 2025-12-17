@@ -6,24 +6,44 @@ const Session = require("../models/Session");
 const DailyStat = require("../models/DailyStat");
 
 const router = express.Router();
-
 const ADMIN_EMAIL = "saifullahfaizan786@gmail.com";
 
-// Admin middleware
 const isAdmin = async (req, res, next) => {
   try {
     const userObjectId = new mongoose.Types.ObjectId(req.userId);
     const user = await User.findById(userObjectId);
-    
+
     if (!user || user.email !== ADMIN_EMAIL) {
       return res.status(403).json({ message: "Access denied. Admin only." });
     }
-    
-    next();
+    return next();
   } catch (err) {
     return res.status(500).json({ message: "Admin check failed" });
   }
 };
+
+const MS_MIN = 60 * 1000;
+const MS_DAY = 24 * 60 * 60 * 1000;
+
+function computeStatus(user) {
+  if (user.pomodoroRunning) return "Active";
+
+  if (!user.lastPomodoroAt) return "Dormant";
+
+  const diff = Date.now() - new Date(user.lastPomodoroAt).getTime();
+  if (diff < 0) return "Recently Active";
+
+  if (diff <= 5 * MS_MIN) return "Recently Active";
+  if (diff <= 30 * MS_DAY) return "Inactive";
+  return "Dormant";
+}
+
+function daysSince(date) {
+  if (!date) return null;
+  const diff = Date.now() - new Date(date).getTime();
+  if (diff < 0) return 0;
+  return Math.floor(diff / MS_DAY);
+}
 
 // ===================================
 // 📊 PLATFORM OVERVIEW STATS
@@ -32,63 +52,46 @@ router.get("/stats", auth, isAdmin, async (req, res) => {
   try {
     const totalUsers = await User.countDocuments();
     const totalSessions = await Session.countDocuments();
-    
-    // Total focus time
+
     const totalFocusTime = await Session.aggregate([
       { $match: { type: "focus" } },
       { $group: { _id: null, total: { $sum: "$duration" } } },
     ]);
 
-    // Total break time
     const totalBreakTime = await Session.aggregate([
       { $match: { type: "break" } },
       { $group: { _id: null, total: { $sum: "$duration" } } },
     ]);
 
-    // Active users (last 7 days)
-    const sevenDaysAgo = new Date();
-    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+    // For overview: treat "active" as used in last 7/30 days (not necessarily running)
+    const sevenDaysAgo = new Date(Date.now() - 7 * MS_DAY);
+    const thirtyDaysAgo = new Date(Date.now() - 30 * MS_DAY);
+
     const activeUsers7d = await User.countDocuments({
-      lastActiveDate: { $gte: sevenDaysAgo.toISOString().split("T")[0] }
+      lastPomodoroAt: { $gte: sevenDaysAgo },
     });
 
-    // Active users (last 30 days)
-    const thirtyDaysAgo = new Date();
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
     const activeUsers30d = await User.countDocuments({
-      lastActiveDate: { $gte: thirtyDaysAgo.toISOString().split("T")[0] }
+      lastPomodoroAt: { $gte: thirtyDaysAgo },
     });
 
-    // New users this week
-    const oneWeekAgo = new Date();
-    oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
-    const newUsersWeek = await User.countDocuments({
-      createdAt: { $gte: oneWeekAgo }
-    });
+    const oneWeekAgo = new Date(Date.now() - 7 * MS_DAY);
+    const newUsersWeek = await User.countDocuments({ createdAt: { $gte: oneWeekAgo } });
 
-    // New users this month
     const oneMonthAgo = new Date();
     oneMonthAgo.setMonth(oneMonthAgo.getMonth() - 1);
-    const newUsersMonth = await User.countDocuments({
-      createdAt: { $gte: oneMonthAgo }
-    });
+    const newUsersMonth = await User.countDocuments({ createdAt: { $gte: oneMonthAgo } });
 
-    // Average session duration
     const avgSessionDuration = await Session.aggregate([
       { $match: { type: "focus" } },
-      { $group: { _id: null, avg: { $avg: "$duration" } } }
+      { $group: { _id: null, avg: { $avg: "$duration" } } },
     ]);
 
-    // Peak usage hour
+    // Peak usage hour (based on completedAt because your Session model uses completedAt)
     const peakHour = await Session.aggregate([
-      {
-        $group: {
-          _id: { $hour: "$timestamp" },
-          count: { $sum: 1 }
-        }
-      },
+      { $group: { _id: { $hour: "$completedAt" }, count: { $sum: 1 } } },
       { $sort: { count: -1 } },
-      { $limit: 1 }
+      { $limit: 1 },
     ]);
 
     return res.json({
@@ -103,7 +106,7 @@ router.get("/stats", auth, isAdmin, async (req, res) => {
       newUsersWeek,
       newUsersMonth,
       avgSessionMinutes: ((avgSessionDuration[0]?.avg || 0) / 60).toFixed(2),
-      peakUsageHour: peakHour[0]?._id || null,
+      peakUsageHour: peakHour[0]?._id ?? null,
     });
   } catch (err) {
     console.error("❌ Admin stats error:", err);
@@ -122,58 +125,37 @@ router.get("/users", auth, isAdmin, async (req, res) => {
       users.map(async (user) => {
         const userId = user._id;
 
-        // Total sessions
         const totalSessions = await Session.countDocuments({ userId });
 
-        // Total focus time
         const totalFocusTime = await Session.aggregate([
           { $match: { userId, type: "focus" } },
           { $group: { _id: null, total: { $sum: "$duration" } } },
         ]);
 
-        // Total break time
         const totalBreakTime = await Session.aggregate([
           { $match: { userId, type: "break" } },
           { $group: { _id: null, total: { $sum: "$duration" } } },
         ]);
 
-        // Average session duration
         const avgDuration = await Session.aggregate([
           { $match: { userId, type: "focus" } },
           { $group: { _id: null, avg: { $avg: "$duration" } } },
         ]);
 
-        // Last session
         const lastSession = await Session.findOne({ userId })
-          .sort({ timestamp: -1 })
-          .select("timestamp duration type")
+          .sort({ completedAt: -1 })
+          .select("completedAt duration type")
           .lean();
 
-        // First session
         const firstSession = await Session.findOne({ userId })
-          .sort({ timestamp: 1 })
-          .select("timestamp")
+          .sort({ completedAt: 1 })
+          .select("completedAt")
           .lean();
 
-        // Active days
         const activeDays = await DailyStat.countDocuments({ userId });
 
-        // Days since last activity
-        let daysSinceLastActive = null;
-        if (user.lastActiveDate) {
-          const lastDate = new Date(user.lastActiveDate);
-          const today = new Date();
-          daysSinceLastActive = Math.floor((today - lastDate) / (1000 * 60 * 60 * 24));
-        }
-
-        // User status
-        let status = "Inactive";
-        if (daysSinceLastActive !== null) {
-          if (daysSinceLastActive <= 1) status = "Active";
-          else if (daysSinceLastActive <= 7) status = "Recently Active";
-          else if (daysSinceLastActive <= 30) status = "Inactive";
-          else status = "Dormant";
-        }
+        const status = computeStatus(user);
+        const daysSinceLastActive = daysSince(user.lastPomodoroAt);
 
         return {
           ...user,
@@ -211,26 +193,18 @@ router.get("/user/:userId", auth, isAdmin, async (req, res) => {
     const userId = new mongoose.Types.ObjectId(req.params.userId);
 
     const user = await User.findById(userId).lean();
-    if (!user) {
-      return res.status(404).json({ message: "User not found" });
-    }
+    if (!user) return res.status(404).json({ message: "User not found" });
 
-    // All sessions
     const sessions = await Session.find({ userId })
-      .sort({ timestamp: -1 })
+      .sort({ completedAt: -1 })
       .limit(100)
       .lean();
 
-    // All daily stats
     const dailyStats = await DailyStat.find({ userId })
       .sort({ date: -1 })
       .lean();
 
-    return res.json({
-      user,
-      sessions,
-      dailyStats,
-    });
+    return res.json({ user, sessions, dailyStats });
   } catch (err) {
     console.error("❌ Admin user detail error:", err);
     return res.status(500).json({ message: "Failed to fetch user details" });
@@ -244,7 +218,6 @@ router.get("/leaderboard", auth, isAdmin, async (req, res) => {
   try {
     const users = await User.find({}).lean();
 
-    // Get stats for all users
     const usersWithStats = await Promise.all(
       users.map(async (user) => {
         const userId = user._id;
@@ -268,30 +241,20 @@ router.get("/leaderboard", auth, isAdmin, async (req, res) => {
       })
     );
 
-    // Sort by focus time
     const byFocusTime = [...usersWithStats]
       .sort((a, b) => b.totalFocusSeconds - a.totalFocusSeconds)
       .slice(0, 10)
-      .map(u => ({
-        ...u,
-        totalFocusHours: (u.totalFocusSeconds / 3600).toFixed(2)
-      }));
+      .map((u) => ({ ...u, totalFocusHours: (u.totalFocusSeconds / 3600).toFixed(2) }));
 
-    // Sort by sessions
     const bySessions = [...usersWithStats]
       .sort((a, b) => b.totalSessions - a.totalSessions)
       .slice(0, 10);
 
-    // Sort by current streak
     const byStreak = [...usersWithStats]
       .sort((a, b) => b.currentStreak - a.currentStreak)
       .slice(0, 10);
 
-    return res.json({
-      topByFocusTime: byFocusTime,
-      topBySessions: bySessions,
-      topByStreak: byStreak,
-    });
+    return res.json({ topByFocusTime: byFocusTime, topBySessions: bySessions, topByStreak: byStreak });
   } catch (err) {
     console.error("❌ Leaderboard error:", err);
     return res.status(500).json({ message: "Failed to fetch leaderboard" });
@@ -303,43 +266,32 @@ router.get("/leaderboard", auth, isAdmin, async (req, res) => {
 // ===================================
 router.get("/timeline", auth, isAdmin, async (req, res) => {
   try {
-    const thirtyDaysAgo = new Date();
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-    const today = new Date();
+    const thirtyDaysAgo = new Date(Date.now() - 30 * MS_DAY);
 
-    // Sessions per day
     const sessionsPerDay = await Session.aggregate([
-      { $match: { timestamp: { $gte: thirtyDaysAgo } } },
+      { $match: { completedAt: { $gte: thirtyDaysAgo } } },
       {
         $group: {
-          _id: {
-            $dateToString: { format: "%Y-%m-%d", date: "$timestamp" }
-          },
+          _id: { $dateToString: { format: "%Y-%m-%d", date: "$completedAt" } },
           count: { $sum: 1 },
-          totalDuration: { $sum: "$duration" }
-        }
+          totalDuration: { $sum: "$duration" },
+        },
       },
-      { $sort: { _id: 1 } }
+      { $sort: { _id: 1 } },
     ]);
 
-    // New users per day
     const newUsersPerDay = await User.aggregate([
       { $match: { createdAt: { $gte: thirtyDaysAgo } } },
       {
         $group: {
-          _id: {
-            $dateToString: { format: "%Y-%m-%d", date: "$createdAt" }
-          },
-          count: { $sum: 1 }
-        }
+          _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } },
+          count: { $sum: 1 },
+        },
       },
-      { $sort: { _id: 1 } }
+      { $sort: { _id: 1 } },
     ]);
 
-    return res.json({
-      sessionsPerDay,
-      newUsersPerDay,
-    });
+    return res.json({ sessionsPerDay, newUsersPerDay });
   } catch (err) {
     console.error("❌ Timeline error:", err);
     return res.status(500).json({ message: "Failed to fetch timeline" });
@@ -351,45 +303,33 @@ router.get("/timeline", auth, isAdmin, async (req, res) => {
 // ===================================
 router.get("/session-analytics", auth, isAdmin, async (req, res) => {
   try {
-    // Sessions by hour of day
     const sessionsByHour = await Session.aggregate([
-      {
-        $group: {
-          _id: { $hour: "$timestamp" },
-          count: { $sum: 1 }
-        }
-      },
-      { $sort: { _id: 1 } }
+      { $group: { _id: { $hour: "$completedAt" }, count: { $sum: 1 } } },
+      { $sort: { _id: 1 } },
     ]);
 
-    // Sessions by day of week
     const sessionsByDayOfWeek = await Session.aggregate([
       {
         $group: {
-          _id: { $dayOfWeek: "$timestamp" },
+          _id: { $dayOfWeek: "$completedAt" },
           count: { $sum: 1 },
-          avgDuration: { $avg: "$duration" }
-        }
+          avgDuration: { $avg: "$duration" },
+        },
       },
-      { $sort: { _id: 1 } }
+      { $sort: { _id: 1 } },
     ]);
 
-    // Focus vs Break distribution
     const typeDistribution = await Session.aggregate([
       {
         $group: {
           _id: "$type",
           count: { $sum: 1 },
-          totalDuration: { $sum: "$duration" }
-        }
-      }
+          totalDuration: { $sum: "$duration" },
+        },
+      },
     ]);
 
-    return res.json({
-      sessionsByHour,
-      sessionsByDayOfWeek,
-      typeDistribution,
-    });
+    return res.json({ sessionsByHour, sessionsByDayOfWeek, typeDistribution });
   } catch (err) {
     console.error("❌ Session analytics error:", err);
     return res.status(500).json({ message: "Failed to fetch session analytics" });

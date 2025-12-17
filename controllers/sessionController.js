@@ -5,65 +5,55 @@ const User = require("../models/User");
 
 exports.saveSession = async (req, res) => {
   try {
+    const userId = new mongoose.Types.ObjectId(req.userId);
     const { duration, type } = req.body;
 
-    if (type !== "focus") {
-      return res.json({ message: "Break session ignored" });
+    if (!duration || !type) {
+      return res.status(400).json({ message: "duration and type are required" });
     }
 
-    const safeDuration = Number(duration);
-    if (!Number.isFinite(safeDuration) || safeDuration <= 0) {
+    if (!["focus", "break"].includes(type)) {
+      return res.status(400).json({ message: "Invalid type" });
+    }
+
+    const dur = Number(duration);
+    if (!Number.isFinite(dur) || dur <= 0) {
       return res.status(400).json({ message: "Invalid duration" });
     }
 
-    const userObjectId = new mongoose.Types.ObjectId(req.userId);
-
     // Save session
-    await Session.create({
-      userId: userObjectId,
-      duration: Math.floor(safeDuration),
+    const session = await Session.create({
+      userId,
+      duration: Math.floor(dur),
       type,
+      completedAt: new Date(),
     });
 
-    // Update daily stats
-    const today = new Date().toISOString().split("T")[0];
-    await DailyStat.findOneAndUpdate(
-      { userId: userObjectId, date: today },
-      { $inc: { totalFocusSeconds: Math.floor(safeDuration) } },
-      { upsert: true, new: true }
+    // Update daily stats only for focus (optional but recommended)
+    const dateStr = new Date().toISOString().split("T")[0];
+    await DailyStat.updateOne(
+      { userId, date: dateStr },
+      { $inc: { totalFocusSeconds: type === "focus" ? Math.floor(dur) : 0 } },
+      { upsert: true }
     );
 
-    // ✅ NEW: Update streak
-    const user = await User.findById(userObjectId);
-    if (user) {
-      const yesterday = new Date();
-      yesterday.setDate(yesterday.getDate() - 1);
-      const yesterdayStr = yesterday.toISOString().split("T")[0];
-
-      if (user.lastActiveDate === today) {
-        // Already logged today, no streak change
-      } else if (user.lastActiveDate === yesterdayStr) {
-        // Consecutive day - increase streak
-        user.currentStreak += 1;
-        if (user.currentStreak > user.longestStreak) {
-          user.longestStreak = user.currentStreak;
-        }
-        user.lastActiveDate = today;
-      } else {
-        // Streak broken - reset to 1
-        user.currentStreak = 1;
-        user.lastActiveDate = today;
+    // ✅ Mark "used pomodoro" and "not running now" after saving session
+    const now = new Date();
+    await User.updateOne(
+      { _id: userId },
+      {
+        $set: {
+          pomodoroRunning: false,
+          pomodoroStartedAt: null,
+          lastPomodoroAt: now,
+          lastActiveDate: now.toISOString().split("T")[0], // legacy
+        },
       }
+    );
 
-      await user.save();
-    }
-
-    return res.json({ 
-      message: "Session saved",
-      streak: user ? user.currentStreak : 0 
-    });
+    return res.json({ message: "Session saved", session });
   } catch (err) {
-    console.error("saveSession error:", err);
-    return res.status(500).json({ error: err.message });
+    console.error("❌ saveSession error:", err);
+    return res.status(500).json({ message: "Failed to save session" });
   }
 };
