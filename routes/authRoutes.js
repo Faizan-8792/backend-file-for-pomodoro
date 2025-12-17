@@ -28,13 +28,18 @@ router.get(
         expiresIn: "7d",
       });
 
+      // ✅ Include streak fields so popup can show 🔥 x N
       const user = {
+        _id: req.user._id,
         name: req.user.name,
         email: req.user.email,
         photo: req.user.photo,
+
+        // streaks
+        currentStreak: req.user.currentStreak || 0,
+        longestStreak: req.user.longestStreak || 0,
       };
 
-      // ✅ FIX: redirect to your deployed backend (not localhost)
       const BASE_URL =
         process.env.BASE_URL || "https://backend-file-for-pomodoro.onrender.com";
 
