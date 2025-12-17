@@ -1,28 +1,43 @@
 const express = require("express");
 const mongoose = require("mongoose");
+
 const auth = require("../middleware/authMiddleware");
-const User = require("../models/User");
+const BrowseStat = require("../models/BrowseStat");
 
 const router = express.Router();
 
-// GET /api/user/streak - Get current user's streak
-router.get("/streak", auth, async (req, res) => {
+/**
+ * POST /api/user/browse-ping
+ * Body: { domain: "example.com", visitedAt?: ISOString }
+ */
+router.post("/browse-ping", auth, async (req, res) => {
   try {
-    const userObjectId = new mongoose.Types.ObjectId(req.userId);
-    const user = await User.findById(userObjectId).select("currentStreak longestStreak lastActiveDate");
+    const userId = new mongoose.Types.ObjectId(req.userId);
 
-    if (!user) {
-      return res.status(404).json({ message: "User not found" });
+    const domain = String(req.body?.domain || "").trim().toLowerCase();
+    if (!domain) return res.status(400).json({ message: "domain is required" });
+
+    const visitedAt = req.body?.visitedAt ? new Date(req.body.visitedAt) : new Date();
+    if (Number.isNaN(visitedAt.getTime())) {
+      return res.status(400).json({ message: "visitedAt invalid" });
     }
 
-    return res.json({
-      currentStreak: user.currentStreak || 0,
-      longestStreak: user.longestStreak || 0,
-      lastActiveDate: user.lastActiveDate,
-    });
+    const now = new Date();
+
+    const updated = await BrowseStat.findOneAndUpdate(
+      { userId, domain },
+      {
+        $inc: { count: 1 },
+        $set: { lastVisitedAt: visitedAt, updatedAt: now },
+        $setOnInsert: { firstSeenAt: visitedAt, createdAt: now },
+      },
+      { upsert: true, new: true }
+    ).lean();
+
+    return res.json({ ok: true, stat: updated });
   } catch (err) {
-    console.error("Get streak error:", err);
-    return res.status(500).json({ message: "Failed to get streak" });
+    console.error("browse-ping error", err);
+    return res.status(500).json({ message: "Failed to save browse ping" });
   }
 });
 
