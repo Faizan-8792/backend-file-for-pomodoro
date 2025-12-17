@@ -6,9 +6,7 @@ const auth = require("../middleware/authMiddleware");
 const User = require("../models/User");
 const Session = require("../models/Session");
 const DailyStat = require("../models/DailyStat");
-
-// NEW (you must create this model file)
-const BrowseStat = require("../models/BrowseStat");
+const BrowseStat = require("../models/BrowseStat"); // NEW
 
 const router = express.Router();
 
@@ -24,11 +22,32 @@ const isAdmin = async (req, res, next) => {
       return res.status(403).json({ message: "Access denied. Admin only." });
     }
 
-    next();
+    return next();
   } catch (err) {
+    console.error("Admin check failed:", err);
     return res.status(500).json({ message: "Admin check failed" });
   }
 };
+
+// ------------------------------
+// helpers
+// ------------------------------
+function computeStatusFromLastActiveAt(lastActiveAt) {
+  if (!lastActiveAt) {
+    return { status: "Dormant", minutesSinceLastActive: null };
+  }
+
+  const ms = Date.now() - new Date(lastActiveAt).getTime();
+  const minutes = Math.floor(ms / (1000 * 60));
+
+  let status = "Dormant";
+  if (minutes <= 2) status = "Active";
+  else if (minutes <= 20) status = "Recently Active";
+  else if (minutes <= 60 * 24 * 30) status = "Inactive"; // up to ~1 month
+  else status = "Dormant";
+
+  return { status, minutesSinceLastActive: minutes };
+}
 
 // ===================================
 // 📊 PLATFORM OVERVIEW STATS
@@ -48,17 +67,15 @@ router.get("/stats", auth, isAdmin, async (req, res) => {
       { $group: { _id: null, total: { $sum: "$duration" } } },
     ]);
 
-    // legacy activeUsers based on lastActiveDate string
+    // legacy counts based on lastActiveDate string (kept)
     const sevenDaysAgo = new Date();
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-
     const activeUsers7d = await User.countDocuments({
       lastActiveDate: { $gte: sevenDaysAgo.toISOString().split("T")[0] },
     });
 
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-
     const activeUsers30d = await User.countDocuments({
       lastActiveDate: { $gte: thirtyDaysAgo.toISOString().split("T")[0] },
     });
@@ -76,7 +93,6 @@ router.get("/stats", auth, isAdmin, async (req, res) => {
       { $group: { _id: null, avg: { $avg: "$duration" } } },
     ]);
 
-    // ✅ FIX: completedAt is the field in Session schema (as in your updated adminRoutes.js)
     const peakHour = await Session.aggregate([
       { $group: { _id: { $hour: "$completedAt" }, count: { $sum: 1 } } },
       { $sort: { count: -1 } },
@@ -147,6 +163,10 @@ router.get("/users", auth, isAdmin, async (req, res) => {
 
         const activeDays = await DailyStat.countDocuments({ userId });
 
+        // ✅ NEW: minute-level status based on lastActiveAt (Date)
+        const { status, minutesSinceLastActive } = computeStatusFromLastActiveAt(user.lastActiveAt);
+
+        // Keep old daysSinceLastActive (optional; helps UI fallback)
         let daysSinceLastActive = null;
         if (user.lastActiveDate) {
           const lastDate = new Date(user.lastActiveDate);
@@ -154,18 +174,11 @@ router.get("/users", auth, isAdmin, async (req, res) => {
           daysSinceLastActive = Math.floor((today - lastDate) / (1000 * 60 * 60 * 24));
         }
 
-        let status = "Inactive";
-        if (daysSinceLastActive !== null) {
-          if (daysSinceLastActive <= 1) status = "Active";
-          else if (daysSinceLastActive <= 7) status = "Recently Active";
-          else if (daysSinceLastActive <= 30) status = "Inactive";
-          else status = "Dormant";
-        }
-
         return {
           ...user,
           stats: {
             totalSessions,
+
             totalFocusSeconds: totalFocusTime[0]?.total || 0,
             totalFocusHours: ((totalFocusTime[0]?.total || 0) / 3600).toFixed(2),
 
@@ -178,8 +191,12 @@ router.get("/users", auth, isAdmin, async (req, res) => {
             lastSession: lastSession || null,
             firstSession: firstSession || null,
 
-            daysSinceLastActive,
+            // NEW fields for UI
             status,
+            minutesSinceLastActive,
+
+            // Optional legacy field
+            daysSinceLastActive,
 
             currentStreak: user.currentStreak || 0,
             longestStreak: user.longestStreak || 0,
@@ -196,7 +213,7 @@ router.get("/users", auth, isAdmin, async (req, res) => {
 });
 
 // ===================================
-// 🔍 INDIVIDUAL USER DETAILS (UPDATED: includes browsing stats)
+// 🔍 INDIVIDUAL USER DETAILS (+ browsing)
 // ===================================
 router.get("/user/:userId", auth, isAdmin, async (req, res) => {
   try {
@@ -208,7 +225,6 @@ router.get("/user/:userId", auth, isAdmin, async (req, res) => {
     const sessions = await Session.find({ userId }).sort({ completedAt: -1 }).limit(100).lean();
     const dailyStats = await DailyStat.find({ userId }).sort({ date: -1 }).lean();
 
-    // NEW: browsing stats (domain-only)
     const topSites = await BrowseStat.find({ userId })
       .sort({ count: -1, lastVisitedAt: -1 })
       .limit(10)
@@ -271,7 +287,6 @@ router.get("/leaderboard", auth, isAdmin, async (req, res) => {
       .map((u) => ({ ...u, totalFocusHours: (u.totalFocusSeconds / 3600).toFixed(2) }));
 
     const bySessions = [...usersWithStats].sort((a, b) => b.totalSessions - a.totalSessions).slice(0, 10);
-
     const byStreak = [...usersWithStats].sort((a, b) => b.currentStreak - a.currentStreak).slice(0, 10);
 
     return res.json({ topByFocusTime: byFocusTime, topBySessions: bySessions, topByStreak: byStreak });
