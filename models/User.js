@@ -1,16 +1,17 @@
 const mongoose = require("mongoose");
 
-const userSchema = new mongoose.Schema(
+const UserSchema = new mongoose.Schema(
   {
-    googleId: { type: String, required: true, index: true, unique: true },
-    name: { type: String, default: "" },
-    email: { type: String, default: "" },
-    photo: { type: String, default: "" },
-    createdAt: { type: Date, default: Date.now },
+    googleId: { type: String, required: true, unique: true },
+    name: { type: String, required: true },
+    email: { type: String, required: true, unique: true },
+    
+    // ✅ NEW: Streak tracking
+    currentStreak: { type: Number, default: 0 },
+    longestStreak: { type: Number, default: 0 },
+    lastActiveDate: { type: String, default: null }, // YYYY-MM-DD format
   },
-  {
-    versionKey: false,
-  }
+  { timestamps: true }
 );
 
-module.exports = mongoose.model("User", userSchema);
+module.exports = mongoose.model("User", UserSchema);
