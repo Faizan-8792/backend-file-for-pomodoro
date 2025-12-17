@@ -8,18 +8,18 @@ const router = express.Router();
 function pad2(n) {
   return String(n).padStart(2, "0");
 }
+
 function toISODate(d) {
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 }
+
 function addDays(date, days) {
   const d = new Date(date);
   d.setDate(d.getDate() + days);
   return d;
 }
 
-/**
- * DAY: last 7 days ending at ?date
- */
+// /api/dashboard/day - Last 7 days
 router.get("/day", auth, async (req, res) => {
   try {
     const anchor = req.query.date ? new Date(req.query.date) : new Date();
@@ -43,9 +43,7 @@ router.get("/day", auth, async (req, res) => {
     for (let i = 6; i >= 0; i--) {
       const d = addDays(anchor, -i);
       const iso = toISODate(d);
-
       labels.push(iso);
-
       const seconds = map.get(iso) || 0;
       values.push(seconds > 0 ? Number((seconds / 3600).toFixed(2)) : null);
     }
@@ -57,19 +55,15 @@ router.get("/day", auth, async (req, res) => {
       range: `${startISO} to ${endISO}`,
     });
   } catch (err) {
-    console.error("day dashboard error:", err);
+    console.error("❌ day dashboard error:", err);
     return res.status(500).json({ message: "Failed to load day dashboard" });
   }
 });
 
-/**
- * WEEK: last 4 ISO weeks ending at ?date
- */
+// /api/dashboard/week - Last 4 weeks
 router.get("/week", auth, async (req, res) => {
   try {
-    const anchor = req.query.date ? new Date(req.query.date) : new Date();
-
-    const labels = ["w1", "w2", "w3", "w4"];
+    const labels = ["Week 1", "Week 2", "Week 3", "Week 4"];
     const values = [null, null, null, null];
 
     const userObjectId = new mongoose.Types.ObjectId(req.userId);
@@ -89,76 +83,33 @@ router.get("/week", auth, async (req, res) => {
       { $sort: { "_id.y": 1, "_id.w": 1 } },
     ]);
 
-    const anchorISO = toISODate(anchor);
-
-    const anchorKeyAgg = await DailyStat.aggregate([
-      { $match: { userId: userObjectId, date: anchorISO } },
-      { $addFields: { dateObj: { $dateFromString: { dateString: "$date" } } } },
-      { $project: { y: { $isoWeekYear: "$dateObj" }, w: { $isoWeek: "$dateObj" } } },
-      { $limit: 1 },
-    ]);
-
-    let anchorY = null;
-    let anchorW = null;
-
-    if (anchorKeyAgg.length) {
-      anchorY = anchorKeyAgg[0].y;
-      anchorW = anchorKeyAgg[0].w;
+    const last4 = stats.slice(-4);
+    for (let i = 0; i < 4; i++) {
+      const row = last4[i];
+      if (!row) continue;
+      const hrs = Number(((row.avgSecondsPerDay || 0) / 3600).toFixed(2));
+      values[i] = hrs > 0 ? hrs : null;
     }
-
-    if (anchorY === null || anchorW === null) {
-      const last4 = stats.slice(-4);
-      for (let i = 0; i < 4; i++) {
-        const row = last4[i];
-        if (!row) continue;
-        const hrs = Number(((row.avgSecondsPerDay || 0) / 3600).toFixed(2));
-        values[i] = hrs > 0 ? hrs : null;
-      }
-
-      return res.json({
-        labels,
-        values,
-        title: "Weekly avg hours/day (last 4 weeks)",
-        range: "Last 4 weeks (based on available data)",
-      });
-    }
-
-    const targets = [
-      { y: anchorY, w: anchorW - 3 },
-      { y: anchorY, w: anchorW - 2 },
-      { y: anchorY, w: anchorW - 1 },
-      { y: anchorY, w: anchorW },
-    ];
-
-    const map = new Map(stats.map((r) => [`${r._id.y}-${r._id.w}`, r.avgSecondsPerDay]));
-
-    targets.forEach((t, idx) => {
-      const sec = map.get(`${t.y}-${t.w}`) || 0;
-      const hrs = Number((sec / 3600).toFixed(2));
-      values[idx] = hrs > 0 ? hrs : null;
-    });
 
     return res.json({
       labels,
       values,
       title: "Weekly avg hours/day (last 4 weeks)",
-      range: `ISO weeks ending near ${toISODate(anchor)}`,
+      range: "Last 4 weeks",
     });
   } catch (err) {
-    console.error("week dashboard error:", err);
+    console.error("❌ week dashboard error:", err);
     return res.status(500).json({ message: "Failed to load week dashboard" });
   }
 });
 
-/**
- * MONTH: 12 months for anchor year
- */
+// /api/dashboard/month - 12 months for current year
 router.get("/month", auth, async (req, res) => {
   try {
     const anchor = req.query.date ? new Date(req.query.date) : new Date();
     const year = anchor.getFullYear();
 
-    const labels = Array.from({ length: 12 }, (_, i) => `m${i + 1}`);
+    const labels = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
     const values = new Array(12).fill(null);
 
     const userObjectId = new mongoose.Types.ObjectId(req.userId);
@@ -195,7 +146,7 @@ router.get("/month", auth, async (req, res) => {
       range: `Year ${year}`,
     });
   } catch (err) {
-    console.error("month dashboard error:", err);
+    console.error("❌ month dashboard error:", err);
     return res.status(500).json({ message: "Failed to load month dashboard" });
   }
 });
