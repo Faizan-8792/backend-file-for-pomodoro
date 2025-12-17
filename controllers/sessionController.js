@@ -1,3 +1,4 @@
+const mongoose = require("mongoose");
 const Session = require("../models/Session");
 const DailyStat = require("../models/DailyStat");
 
@@ -5,7 +6,6 @@ exports.saveSession = async (req, res) => {
   try {
     const { duration, type } = req.body;
 
-    // Keep same behavior: ignore non-focus sessions. [file:59]
     if (type !== "focus") {
       return res.json({ message: "Break session ignored" });
     }
@@ -16,18 +16,21 @@ exports.saveSession = async (req, res) => {
       return res.status(400).json({ message: "Invalid duration" });
     }
 
-    // Save session (same fields, same req.userId). [file:59]
+    // IMPORTANT FIX: Convert req.userId (string from JWT) to ObjectId
+    const userObjectId = new mongoose.Types.ObjectId(req.userId);
+
+    // Save session
     await Session.create({
-      userId: req.userId,
+      userId: userObjectId,
       duration: Math.floor(safeDuration),
       type,
     });
 
-    // Update daily stats (same date format, same $inc key). [file:59]
+    // Update daily stats
     const today = new Date().toISOString().split("T")[0];
 
     await DailyStat.findOneAndUpdate(
-      { userId: req.userId, date: today },
+      { userId: userObjectId, date: today },
       { $inc: { totalFocusSeconds: Math.floor(safeDuration) } },
       { upsert: true, new: true }
     );
