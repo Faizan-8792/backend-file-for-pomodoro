@@ -22,6 +22,7 @@ require("./config/passport");
 const authRoutes = require("./routes/authRoutes");
 const sessionRoutes = require("./routes/sessionRoutes");
 const dashboardRoutes = require("./routes/dashboardRoutes");
+const adminRoutes = require("./routes/adminRoutes");
 
 /* ===============================
    MIDDLEWARE
@@ -41,6 +42,7 @@ connectDB();
 =============================== */
 console.log("Server cwd:", process.cwd());
 console.log("Loaded dashboardRoutes from:", require.resolve("./routes/dashboardRoutes"));
+console.log("Loaded adminRoutes from:", require.resolve("./routes/adminRoutes"));
 
 /* ===============================
    ROUTE MOUNTING
@@ -48,6 +50,7 @@ console.log("Loaded dashboardRoutes from:", require.resolve("./routes/dashboardR
 app.use("/auth", authRoutes);
 app.use("/api/session", sessionRoutes);
 app.use("/api/dashboard", dashboardRoutes);
+app.use("/api/admin", adminRoutes);
 
 /* ===============================
    DEBUG: list registered routes
