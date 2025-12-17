@@ -1,18 +1,20 @@
+// routes/adminRoutes.js
 const express = require("express");
 const mongoose = require("mongoose");
 
 const auth = require("../middleware/authMiddleware");
-
 const User = require("../models/User");
 const Session = require("../models/Session");
 const DailyStat = require("../models/DailyStat");
-const BrowseStat = require("../models/BrowseStat"); // NEW
+const BrowseStat = require("../models/BrowseStat");
 
 const router = express.Router();
 
 const ADMIN_EMAIL = "saifullahfaizan786@gmail.com";
 
+// ------------------------------
 // Admin middleware
+// ------------------------------
 const isAdmin = async (req, res, next) => {
   try {
     const userObjectId = new mongoose.Types.ObjectId(req.userId);
@@ -70,22 +72,26 @@ router.get("/stats", auth, isAdmin, async (req, res) => {
     // legacy counts based on lastActiveDate string (kept)
     const sevenDaysAgo = new Date();
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
     const activeUsers7d = await User.countDocuments({
       lastActiveDate: { $gte: sevenDaysAgo.toISOString().split("T")[0] },
     });
 
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
     const activeUsers30d = await User.countDocuments({
       lastActiveDate: { $gte: thirtyDaysAgo.toISOString().split("T")[0] },
     });
 
     const oneWeekAgo = new Date();
     oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
+
     const newUsersWeek = await User.countDocuments({ createdAt: { $gte: oneWeekAgo } });
 
     const oneMonthAgo = new Date();
     oneMonthAgo.setMonth(oneMonthAgo.getMonth() - 1);
+
     const newUsersMonth = await User.countDocuments({ createdAt: { $gte: oneMonthAgo } });
 
     const avgSessionDuration = await Session.aggregate([
@@ -102,10 +108,8 @@ router.get("/stats", auth, isAdmin, async (req, res) => {
     return res.json({
       totalUsers,
       totalSessions,
-
       totalFocusSeconds: totalFocusTime[0]?.total || 0,
       totalFocusHours: ((totalFocusTime[0]?.total || 0) / 3600).toFixed(2),
-
       totalBreakSeconds: totalBreakTime[0]?.total || 0,
       totalBreakHours: ((totalBreakTime[0]?.total || 0) / 3600).toFixed(2),
 
@@ -163,10 +167,10 @@ router.get("/users", auth, isAdmin, async (req, res) => {
 
         const activeDays = await DailyStat.countDocuments({ userId });
 
-        // ✅ NEW: minute-level status based on lastActiveAt (Date)
-        const { status, minutesSinceLastActive } = computeStatusFromLastActiveAt(user.lastActiveAt);
+        // ✅ FIX: use lastPomodoroAt (exists + updated by presence routes)
+        const { status, minutesSinceLastActive } = computeStatusFromLastActiveAt(user.lastPomodoroAt);
 
-        // Keep old daysSinceLastActive (optional; helps UI fallback)
+        // Optional legacy days calculation
         let daysSinceLastActive = null;
         if (user.lastActiveDate) {
           const lastDate = new Date(user.lastActiveDate);
@@ -178,10 +182,8 @@ router.get("/users", auth, isAdmin, async (req, res) => {
           ...user,
           stats: {
             totalSessions,
-
             totalFocusSeconds: totalFocusTime[0]?.total || 0,
             totalFocusHours: ((totalFocusTime[0]?.total || 0) / 3600).toFixed(2),
-
             totalBreakSeconds: totalBreakTime[0]?.total || 0,
             totalBreakHours: ((totalBreakTime[0]?.total || 0) / 3600).toFixed(2),
 
@@ -191,11 +193,9 @@ router.get("/users", auth, isAdmin, async (req, res) => {
             lastSession: lastSession || null,
             firstSession: firstSession || null,
 
-            // NEW fields for UI
             status,
             minutesSinceLastActive,
 
-            // Optional legacy field
             daysSinceLastActive,
 
             currentStreak: user.currentStreak || 0,
@@ -289,7 +289,11 @@ router.get("/leaderboard", auth, isAdmin, async (req, res) => {
     const bySessions = [...usersWithStats].sort((a, b) => b.totalSessions - a.totalSessions).slice(0, 10);
     const byStreak = [...usersWithStats].sort((a, b) => b.currentStreak - a.currentStreak).slice(0, 10);
 
-    return res.json({ topByFocusTime: byFocusTime, topBySessions: bySessions, topByStreak: byStreak });
+    return res.json({
+      topByFocusTime: byFocusTime,
+      topBySessions: bySessions,
+      topByStreak: byStreak,
+    });
   } catch (err) {
     console.error("❌ Leaderboard error:", err);
     return res.status(500).json({ message: "Failed to fetch leaderboard" });
