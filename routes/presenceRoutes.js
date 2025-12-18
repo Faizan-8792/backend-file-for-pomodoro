@@ -5,10 +5,12 @@ const User = require("../models/User");
 
 const router = express.Router();
 
-/**
- * POST /api/presence/start
- * Marks user as currently running pomodoro.
- */
+const IST_OFFSET_MIN = 330;
+function isoDateIST(d = new Date()) {
+  const ist = new Date(d.getTime() + IST_OFFSET_MIN * 60 * 1000);
+  return ist.toISOString().slice(0, 10);
+}
+
 router.post("/start", auth, async (req, res) => {
   try {
     const userId = new mongoose.Types.ObjectId(req.userId);
@@ -21,8 +23,8 @@ router.post("/start", auth, async (req, res) => {
           pomodoroRunning: true,
           pomodoroStartedAt: now,
           lastPomodoroAt: now,
-          lastActiveDate: now.toISOString().split("T")[0], // legacy
-        },
+          lastActiveDate: isoDateIST(now)
+        }
       }
     );
 
@@ -33,10 +35,6 @@ router.post("/start", auth, async (req, res) => {
   }
 });
 
-/**
- * POST /api/presence/heartbeat
- * Keeps user active while timer is running.
- */
 router.post("/heartbeat", auth, async (req, res) => {
   try {
     const userId = new mongoose.Types.ObjectId(req.userId);
@@ -48,8 +46,8 @@ router.post("/heartbeat", auth, async (req, res) => {
         $set: {
           pomodoroRunning: true,
           lastPomodoroAt: now,
-          lastActiveDate: now.toISOString().split("T")[0], // legacy
-        },
+          lastActiveDate: isoDateIST(now)
+        }
       }
     );
 
@@ -60,10 +58,6 @@ router.post("/heartbeat", auth, async (req, res) => {
   }
 });
 
-/**
- * POST /api/presence/stop
- * Marks user not active (not running).
- */
 router.post("/stop", auth, async (req, res) => {
   try {
     const userId = new mongoose.Types.ObjectId(req.userId);
@@ -75,9 +69,9 @@ router.post("/stop", auth, async (req, res) => {
         $set: {
           pomodoroRunning: false,
           pomodoroStartedAt: null,
-          lastPomodoroAt: now, // they used pomodoro recently
-          lastActiveDate: now.toISOString().split("T")[0], // legacy
-        },
+          lastPomodoroAt: now,
+          lastActiveDate: isoDateIST(now)
+        }
       }
     );
 

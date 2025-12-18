@@ -3,6 +3,13 @@ const Session = require("../models/Session");
 const DailyStat = require("../models/DailyStat");
 const User = require("../models/User");
 
+const IST_OFFSET_MIN = 330;
+
+function isoDateIST(d = new Date()) {
+  const ist = new Date(d.getTime() + IST_OFFSET_MIN * 60 * 1000);
+  return ist.toISOString().slice(0, 10); // YYYY-MM-DD
+}
+
 exports.saveSession = async (req, res) => {
   try {
     const userId = new mongoose.Types.ObjectId(req.userId);
@@ -21,24 +28,26 @@ exports.saveSession = async (req, res) => {
       return res.status(400).json({ message: "Invalid duration" });
     }
 
+    const now = new Date();
+
     // Save session
     const session = await Session.create({
       userId,
       duration: Math.floor(dur),
       type,
-      completedAt: new Date(),
+      completedAt: now
     });
 
-    // Update daily stats only for focus (optional but recommended)
-    const dateStr = new Date().toISOString().split("T")[0];
+    // ✅ Use IST date for daily bucket
+    const dateStr = isoDateIST(now);
+
     await DailyStat.updateOne(
       { userId, date: dateStr },
       { $inc: { totalFocusSeconds: type === "focus" ? Math.floor(dur) : 0 } },
       { upsert: true }
     );
 
-    // ✅ Mark "used pomodoro" and "not running now" after saving session
-    const now = new Date();
+    // Mark not running
     await User.updateOne(
       { _id: userId },
       {
@@ -46,8 +55,8 @@ exports.saveSession = async (req, res) => {
           pomodoroRunning: false,
           pomodoroStartedAt: null,
           lastPomodoroAt: now,
-          lastActiveDate: now.toISOString().split("T")[0], // legacy
-        },
+          lastActiveDate: isoDateIST(now)
+        }
       }
     );
 
