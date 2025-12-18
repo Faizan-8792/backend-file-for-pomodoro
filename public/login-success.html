@@ -1,42 +1,30 @@
-<!DOCTYPE html>
-<html lang="en">
+<!doctype html>
+<html>
   <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>Login Success</title>
+    <meta charset="utf-8" />
+    <title>Login success</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <style>
-      body {
-        font-family: Arial, sans-serif;
-        padding: 24px;
-        color: #111;
-      }
-      .card {
-        max-width: 520px;
-        margin: 0 auto;
-        border: 1px solid #e5e7eb;
-        border-radius: 12px;
-        padding: 16px;
-      }
-      .muted {
-        color: #6b7280;
-        font-size: 13px;
-      }
-      code {
-        background: #f3f4f6;
-        padding: 2px 6px;
-        border-radius: 6px;
-      }
+      body { font-family: Arial, sans-serif; padding: 24px; }
+      code { background:#f3f3f3; padding: 4px 8px; border-radius: 6px; display:inline-block; }
+      button { padding:10px 12px; border:0; border-radius:8px; cursor:pointer; }
     </style>
   </head>
-
   <body>
-    <div class="card">
-      <h3>Login successful.</h3>
-      <p class="muted">You can close this tab now.</p>
-      <p class="muted">
-        If you came here from the extension, the main success page is
-        <code>/auth-success.html</code>.
-      </p>
-    </div>
+    <h2>Login successful</h2>
+    <p>Now open the Smart Pomodoro extension popup and click <b>Complete Login</b>.</p>
+    <p>Your login code (valid for ~2 minutes):</p>
+    <p><code id="code"></code></p>
+    <button id="copy">Copy code</button>
+
+    <script>
+      const params = new URLSearchParams(location.search);
+      const code = params.get("code") || "";
+      document.getElementById("code").textContent = code;
+
+      document.getElementById("copy").addEventListener("click", async () => {
+        try { await navigator.clipboard.writeText(code); alert("Copied"); } catch(e) { alert("Copy failed"); }
+      });
+    </script>
   </body>
 </html>

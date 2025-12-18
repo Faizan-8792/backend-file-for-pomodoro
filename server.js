@@ -27,16 +27,19 @@ const adminRoutes = require("./routes/adminRoutes");
 const userRoutes = require("./routes/userRoutes");
 const presenceRoutes = require("./routes/presenceRoutes");
 
+// ✅ NEW: exchange route for universal login
+const authExchangeRoutes = require("./routes/authExchangeRoutes");
+
 /* ===============================
    MIDDLEWARE
 ================================ */
 app.use(cors());
 app.use(express.json());
 
-// Safer static path (absolute)
-app.use(express.static(path.join(__dirname, "public"))); // [web:128]
+// Static files from /public (login-success.html will live here)
+app.use(express.static(path.join(__dirname, "public")));
 
-app.use(passport.initialize()); // required for passport [web:130]
+app.use(passport.initialize());
 
 /* ===============================
    CONNECT DB
@@ -44,18 +47,10 @@ app.use(passport.initialize()); // required for passport [web:130]
 connectDB();
 
 /* ===============================
-   DEBUG: confirm loaded files
-================================ */
-console.log("Server cwd:", process.cwd());
-console.log("Loaded dashboardRoutes from:", require.resolve("./routes/dashboardRoutes"));
-console.log("Loaded adminRoutes from:", require.resolve("./routes/adminRoutes"));
-console.log("Loaded userRoutes from:", require.resolve("./routes/userRoutes"));
-console.log("Loaded presenceRoutes from:", require.resolve("./routes/presenceRoutes"));
-
-/* ===============================
    ROUTE MOUNTING
 ================================ */
 app.use("/auth", authRoutes);
+app.use("/api/auth", authExchangeRoutes); // ✅ NEW
 app.use("/api/session", sessionRoutes);
 app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/admin", adminRoutes);
@@ -68,8 +63,6 @@ app.use("/api/presence", presenceRoutes);
 ================================ */
 app.get("/__routes", (req, res) => {
   const routes = [];
-
-  // Express sometimes stores stack differently across versions; guard it. [web:120]
   const rootRouter = app._router || app.router;
   const stack = rootRouter?.stack || [];
 
@@ -80,10 +73,7 @@ app.get("/__routes", (req, res) => {
           .filter((m) => layer.route.methods[m])
           .map((m) => m.toUpperCase());
 
-        routes.push({
-          methods,
-          path: prefix + layer.route.path
-        });
+        routes.push({ methods, path: prefix + layer.route.path });
       } else if (layer?.name === "router" && layer?.handle?.stack) {
         walk(layer.handle.stack, prefix);
       }
