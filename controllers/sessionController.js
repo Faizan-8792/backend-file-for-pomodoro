@@ -17,43 +17,66 @@ function isoDateIST(date = new Date()) {
   return `${get("year")}-${get("month")}-${get("day")}`;
 }
 
+// ✅ Normalize any incoming duration to SECONDS safely
+function normalizeDurationToSeconds(raw) {
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return null;
+
+  // Heuristics:
+  // - If n is small (<= 12) it might be HOURS (e.g., 0.5, 2)
+  // - If n is moderate (<= 720) it might be MINUTES
+  // - Otherwise assume SECONDS
+  let seconds = n;
+
+  if (n > 0 && n <= 12) {
+    // treat as hours (0.5 => 30min)
+    seconds = Math.round(n * 3600);
+  } else if (n > 12 && n <= 720) {
+    // treat as minutes
+    seconds = Math.round(n * 60);
+  } else {
+    // treat as seconds
+    seconds = Math.round(n);
+  }
+
+  // Hard safety cap: max 12 hours per saved session
+  if (seconds > 12 * 3600) return null;
+
+  return seconds;
+}
+
 exports.saveSession = async (req, res) => {
   try {
     const userId = new mongoose.Types.ObjectId(req.userId);
     const { duration, type } = req.body;
 
-    if (!duration || !type) {
+    if (duration === undefined || type === undefined) {
       return res.status(400).json({ message: "duration and type are required" });
     }
-
     if (!["focus", "break"].includes(type)) {
       return res.status(400).json({ message: "Invalid type" });
     }
 
-    const dur = Number(duration);
-    if (!Number.isFinite(dur) || dur <= 0) {
-      return res.status(400).json({ message: "Invalid duration" });
+    const seconds = normalizeDurationToSeconds(duration);
+    if (!seconds) {
+      return res.status(400).json({ message: "Invalid duration (expected seconds)" });
     }
 
-    // Save session
     const session = await Session.create({
       userId,
-      duration: Math.floor(dur),
+      duration: seconds,            // ✅ store seconds only
       type,
       completedAt: new Date()
     });
 
-    // ✅ IST day bucket
     const dayIST = isoDateIST(new Date());
 
-    // ✅ Only focus counts
     await DailyStat.updateOne(
       { userId, date: dayIST },
-      { $inc: { totalFocusSeconds: type === "focus" ? Math.floor(dur) : 0 } },
+      { $inc: { totalFocusSeconds: type === "focus" ? seconds : 0 } },
       { upsert: true }
     );
 
-    // Update user flags
     const now = new Date();
     await User.updateOne(
       { _id: userId },
@@ -67,7 +90,7 @@ exports.saveSession = async (req, res) => {
       }
     );
 
-    return res.json({ message: "Session saved", session });
+    return res.json({ message: "Session saved", session, normalizedSeconds: seconds });
   } catch (err) {
     console.error("❌ saveSession error:", err);
     return res.status(500).json({ message: "Failed to save session" });
