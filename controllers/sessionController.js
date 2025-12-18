@@ -20,10 +20,9 @@ function isoDateIST(date = new Date()) {
 exports.saveSession = async (req, res) => {
   try {
     const userId = new mongoose.Types.ObjectId(req.userId);
-
     const { duration, type } = req.body;
 
-    if (duration === undefined || type === undefined) {
+    if (!duration || !type) {
       return res.status(400).json({ message: "duration and type are required" });
     }
 
@@ -36,6 +35,7 @@ exports.saveSession = async (req, res) => {
       return res.status(400).json({ message: "Invalid duration" });
     }
 
+    // Save session
     const session = await Session.create({
       userId,
       duration: Math.floor(dur),
@@ -43,18 +43,17 @@ exports.saveSession = async (req, res) => {
       completedAt: new Date()
     });
 
-    // ✅ correct IST day bucket
+    // ✅ IST day bucket
     const dayIST = isoDateIST(new Date());
 
-    // ✅ only focus counts in study stats
-    if (type === "focus") {
-      await DailyStat.updateOne(
-        { userId, date: dayIST },
-        { $inc: { totalFocusSeconds: Math.floor(dur) } },
-        { upsert: true }
-      );
-    }
+    // ✅ Only focus counts
+    await DailyStat.updateOne(
+      { userId, date: dayIST },
+      { $inc: { totalFocusSeconds: type === "focus" ? Math.floor(dur) : 0 } },
+      { upsert: true }
+    );
 
+    // Update user flags
     const now = new Date();
     await User.updateOne(
       { _id: userId },
@@ -68,9 +67,9 @@ exports.saveSession = async (req, res) => {
       }
     );
 
-    return res.json({ message: "Session saved", session, day: dayIST });
+    return res.json({ message: "Session saved", session });
   } catch (err) {
-    console.error("saveSession error:", err);
+    console.error("❌ saveSession error:", err);
     return res.status(500).json({ message: "Failed to save session" });
   }
 };
