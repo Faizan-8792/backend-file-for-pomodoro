@@ -1,35 +1,61 @@
 const express = require("express");
 const passport = require("passport");
 const jwt = require("jsonwebtoken");
+
 const router = express.Router();
 
-const User = require("../models/User"); // ✅ FIXED
+/**
+ * @route GET /auth/google
+ * @desc Start Google OAuth
+ */
+router.get(
+  "/google",
+  passport.authenticate("google", {
+    scope: ["profile", "email"]
+  })
+);
 
-const BASE_URL = (process.env.BASE_URL || "http://localhost:5000").replace(/\/$/, "");
-
-router.get("/google", passport.authenticate("google", { scope: ["profile", "email"] }));
-
+/**
+ * @route GET /auth/google/callback
+ * @desc Google OAuth callback
+ */
 router.get(
   "/google/callback",
   passport.authenticate("google", { session: false }),
-  async (req, res) => {
+  (req, res) => {
     try {
-      const dbUser = await User.findById(req.user._id).lean();
-      if (!dbUser) return res.status(401).send("User not found");
+      if (!req.user?._id) {
+        return res.status(500).send("User not found after Google auth");
+      }
 
-      const token = jwt.sign({ id: dbUser._id }, process.env.JWT_SECRET, { expiresIn: "7d" });
+      if (!process.env.JWT_SECRET) {
+        return res.status(500).send("JWT_SECRET missing");
+      }
 
+      // ✅ REQUIRED: put your extension id in backend env
+      // Example: EXTENSION_ID=abcdefghijklmnopqrstu
+      const EXT_ID = process.env.EXTENSION_ID;
+      if (!EXT_ID) {
+        return res.status(500).send("EXTENSION_ID missing in server env");
+      }
+
+      const token = jwt.sign({ id: req.user._id }, process.env.JWT_SECRET, {
+        expiresIn: "7d"
+      });
+
+      // ✅ Include streak fields so popup can show 🔥 x N
       const user = {
-        id: String(dbUser._id),
-        name: dbUser.name,
-        email: dbUser.email,
-        photo: dbUser.photo,
-        currentStreak: dbUser.currentStreak || 0,
-        longestStreak: dbUser.longestStreak || 0
+        _id: req.user._id,
+        name: req.user.name,
+        email: req.user.email,
+        photo: req.user.photo,
+        currentStreak: req.user.currentStreak || 0,
+        longestStreak: req.user.longestStreak || 0
       };
 
+      // ✅ Redirect to extension page (NOT hosted backend page)
       const redirectUrl =
-        `${BASE_URL}/auth-success.html` +
+        `chrome-extension://${EXT_ID}/auth-success.html` +
         `?token=${encodeURIComponent(token)}` +
         `&user=${encodeURIComponent(JSON.stringify(user))}`;
 
