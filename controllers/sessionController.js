@@ -1,4 +1,5 @@
 // backend/controllers/sessionController.js
+
 const mongoose = require("mongoose");
 const Session = require("../models/Session");
 const DailyStat = require("../models/DailyStat");
@@ -10,7 +11,7 @@ function isoDateIST(date = new Date()) {
     timeZone: "Asia/Kolkata",
     year: "numeric",
     month: "2-digit",
-    day: "2-digit"
+    day: "2-digit",
   }).formatToParts(date);
 
   const get = (type) => parts.find((p) => p.type === type)?.value;
@@ -18,26 +19,13 @@ function isoDateIST(date = new Date()) {
 }
 
 // ✅ Normalize any incoming duration to SECONDS safely
+// NOW: always treat input as SECONDS
 function normalizeDurationToSeconds(raw) {
   const n = Number(raw);
   if (!Number.isFinite(n) || n <= 0) return null;
 
-  // Heuristics:
-  // - If n is small (<= 12) it might be HOURS (e.g., 0.5, 2)
-  // - If n is moderate (<= 720) it might be MINUTES
-  // - Otherwise assume SECONDS
-  let seconds = n;
-
-  if (n > 0 && n <= 12) {
-    // treat as hours (0.5 => 30min)
-    seconds = Math.round(n * 3600);
-  } else if (n > 12 && n <= 720) {
-    // treat as minutes
-    seconds = Math.round(n * 60);
-  } else {
-    // treat as seconds
-    seconds = Math.round(n);
-  }
+  // Treat as seconds directly
+  const seconds = Math.round(n);
 
   // Hard safety cap: max 12 hours per saved session
   if (seconds > 12 * 3600) return null;
@@ -53,6 +41,7 @@ exports.saveSession = async (req, res) => {
     if (duration === undefined || type === undefined) {
       return res.status(400).json({ message: "duration and type are required" });
     }
+
     if (!["focus", "break"].includes(type)) {
       return res.status(400).json({ message: "Invalid type" });
     }
@@ -64,9 +53,9 @@ exports.saveSession = async (req, res) => {
 
     const session = await Session.create({
       userId,
-      duration: seconds,            // ✅ store seconds only
+      duration: seconds, // ✅ store seconds only
       type,
-      completedAt: new Date()
+      completedAt: new Date(),
     });
 
     const dayIST = isoDateIST(new Date());
@@ -85,8 +74,8 @@ exports.saveSession = async (req, res) => {
           pomodoroRunning: false,
           pomodoroStartedAt: null,
           lastPomodoroAt: now,
-          lastActiveDate: dayIST
-        }
+          lastActiveDate: dayIST,
+        },
       }
     );
 
