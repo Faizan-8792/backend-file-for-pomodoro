@@ -45,3 +45,4 @@ const BrowseStatSchema = new mongoose.Schema(
 BrowseStatSchema.index({ userId: 1, domain: 1 }, { unique: true });
 
 module.exports = mongoose.model("BrowseStat", BrowseStatSchema);
+

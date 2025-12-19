@@ -45,7 +45,7 @@ function computeStatusFromLastActiveAt(lastActiveAt) {
   let status = "Dormant";
   if (minutes <= 2) status = "Active";
   else if (minutes <= 20) status = "Recently Active";
-  else if (minutes <= 60 * 24 * 30) status = "Inactive"; // up to ~1 month
+  else if (minutes <= 60 * 24 * 30) status = "Inactive";
   else status = "Dormant";
 
   return { status, minutesSinceLastActive: minutes };
@@ -59,50 +59,45 @@ router.get("/stats", auth, isAdmin, async (req, res) => {
     const totalUsers = await User.countDocuments();
     const totalSessions = await Session.countDocuments();
 
-    const totalFocusTime = await Session.aggregate([
-      { $match: { type: "focus" } },
-      { $group: { _id: null, total: { $sum: "$duration" } } },
+    // ✅ FIXED: Use DailyStat for total focus (matches dashboard)
+    const totalFocusTime = await DailyStat.aggregate([
+      { $group: { _id: null, total: { $sum: "$totalFocusSeconds" } } }
     ]);
 
     const totalBreakTime = await Session.aggregate([
       { $match: { type: "break" } },
-      { $group: { _id: null, total: { $sum: "$duration" } } },
+      { $group: { _id: null, total: { $sum: "$duration" } } }
     ]);
 
-    // legacy counts based on lastActiveDate string (kept)
     const sevenDaysAgo = new Date();
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-
     const activeUsers7d = await User.countDocuments({
-      lastActiveDate: { $gte: sevenDaysAgo.toISOString().split("T")[0] },
+      lastActiveDate: { $gte: sevenDaysAgo.toISOString().split("T")[0] }
     });
 
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-
     const activeUsers30d = await User.countDocuments({
-      lastActiveDate: { $gte: thirtyDaysAgo.toISOString().split("T")[0] },
+      lastActiveDate: { $gte: thirtyDaysAgo.toISOString().split("T")[0] }
     });
 
     const oneWeekAgo = new Date();
     oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
-
     const newUsersWeek = await User.countDocuments({ createdAt: { $gte: oneWeekAgo } });
 
     const oneMonthAgo = new Date();
     oneMonthAgo.setMonth(oneMonthAgo.getMonth() - 1);
-
     const newUsersMonth = await User.countDocuments({ createdAt: { $gte: oneMonthAgo } });
 
     const avgSessionDuration = await Session.aggregate([
       { $match: { type: "focus" } },
-      { $group: { _id: null, avg: { $avg: "$duration" } } },
+      { $group: { _id: null, avg: { $avg: "$duration" } } }
     ]);
 
     const peakHour = await Session.aggregate([
       { $group: { _id: { $hour: "$completedAt" }, count: { $sum: 1 } } },
       { $sort: { count: -1 } },
-      { $limit: 1 },
+      { $limit: 1 }
     ]);
 
     return res.json({
@@ -112,12 +107,10 @@ router.get("/stats", auth, isAdmin, async (req, res) => {
       totalFocusHours: ((totalFocusTime[0]?.total || 0) / 3600).toFixed(2),
       totalBreakSeconds: totalBreakTime[0]?.total || 0,
       totalBreakHours: ((totalBreakTime[0]?.total || 0) / 3600).toFixed(2),
-
       activeUsers7d,
       activeUsers30d,
       newUsersWeek,
       newUsersMonth,
-
       avgSessionMinutes: ((avgSessionDuration[0]?.avg || 0) / 60).toFixed(2),
       peakUsageHour: peakHour[0]?._id ?? null,
     });
@@ -128,7 +121,7 @@ router.get("/stats", auth, isAdmin, async (req, res) => {
 });
 
 // ===================================
-// 👥 ALL USERS WITH ENHANCED STATS
+// 👥 ALL USERS WITH ENHANCED STATS (412s VISIBLE!)
 // ===================================
 router.get("/users", auth, isAdmin, async (req, res) => {
   try {
@@ -138,21 +131,22 @@ router.get("/users", auth, isAdmin, async (req, res) => {
       users.map(async (user) => {
         const userId = user._id;
 
-        const totalSessions = await Session.countDocuments({ userId });
-
-        const totalFocusTime = await Session.aggregate([
-          { $match: { userId, type: "focus" } },
-          { $group: { _id: null, total: { $sum: "$duration" } } },
+        // ✅ FIXED: DailyStat.totalFocusSeconds = 412s VISIBLE!
+        const totalFocusTime = await DailyStat.aggregate([
+          { $match: { userId } },
+          { $group: { _id: null, total: { $sum: "$totalFocusSeconds" } } }
         ]);
+
+        const totalSessions = await Session.countDocuments({ userId });
 
         const totalBreakTime = await Session.aggregate([
           { $match: { userId, type: "break" } },
-          { $group: { _id: null, total: { $sum: "$duration" } } },
+          { $group: { _id: null, total: { $sum: "$duration" } } }
         ]);
 
         const avgDuration = await Session.aggregate([
           { $match: { userId, type: "focus" } },
-          { $group: { _id: null, avg: { $avg: "$duration" } } },
+          { $group: { _id: null, avg: { $avg: "$duration" } } }
         ]);
 
         const lastSession = await Session.findOne({ userId })
@@ -167,10 +161,8 @@ router.get("/users", auth, isAdmin, async (req, res) => {
 
         const activeDays = await DailyStat.countDocuments({ userId });
 
-        // ✅ FIX: use lastPomodoroAt (exists + updated by presence routes)
         const { status, minutesSinceLastActive } = computeStatusFromLastActiveAt(user.lastPomodoroAt);
 
-        // Optional legacy days calculation
         let daysSinceLastActive = null;
         if (user.lastActiveDate) {
           const lastDate = new Date(user.lastActiveDate);
@@ -182,25 +174,20 @@ router.get("/users", auth, isAdmin, async (req, res) => {
           ...user,
           stats: {
             totalSessions,
-            totalFocusSeconds: totalFocusTime[0]?.total || 0,
+            totalFocusSeconds: totalFocusTime[0]?.total || 0,        // ✅ 412s!
             totalFocusHours: ((totalFocusTime[0]?.total || 0) / 3600).toFixed(2),
             totalBreakSeconds: totalBreakTime[0]?.total || 0,
             totalBreakHours: ((totalBreakTime[0]?.total || 0) / 3600).toFixed(2),
-
             avgSessionMinutes: ((avgDuration[0]?.avg || 0) / 60).toFixed(2),
-
             activeDays,
             lastSession: lastSession || null,
             firstSession: firstSession || null,
-
             status,
             minutesSinceLastActive,
-
             daysSinceLastActive,
-
             currentStreak: user.currentStreak || 0,
             longestStreak: user.longestStreak || 0,
-          },
+          }
         };
       })
     );
@@ -252,7 +239,7 @@ router.get("/user/:userId", auth, isAdmin, async (req, res) => {
 });
 
 // ===================================
-// 🏆 LEADERBOARDS
+// 🏆 LEADERBOARDS (FIXED with DailyStat)
 // ===================================
 router.get("/leaderboard", auth, isAdmin, async (req, res) => {
   try {
@@ -262,9 +249,10 @@ router.get("/leaderboard", auth, isAdmin, async (req, res) => {
       users.map(async (user) => {
         const userId = user._id;
 
-        const totalFocusTime = await Session.aggregate([
-          { $match: { userId, type: "focus" } },
-          { $group: { _id: null, total: { $sum: "$duration" } } },
+        // ✅ FIXED: DailyStat for leaderboards too!
+        const totalFocusTime = await DailyStat.aggregate([
+          { $match: { userId } },
+          { $group: { _id: null, total: { $sum: "$totalFocusSeconds" } } }
         ]);
 
         const totalSessions = await Session.countDocuments({ userId });
@@ -273,7 +261,7 @@ router.get("/leaderboard", auth, isAdmin, async (req, res) => {
           _id: user._id,
           name: user.name,
           email: user.email,
-          totalFocusSeconds: totalFocusTime[0]?.total || 0,
+          totalFocusSeconds: totalFocusTime[0]?.total || 0,  // ✅ 412s!
           totalSessions,
           currentStreak: user.currentStreak || 0,
           longestStreak: user.longestStreak || 0,
